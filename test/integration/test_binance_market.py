@@ -222,6 +222,19 @@ class BinanceMarketUnitTest(unittest.TestCase):
                                                   Decimal('0.1'))
         self.assertAlmostEqual(Decimal("0.005"), maker_fee.percent)
 
+    def place_order(self, is_buy, trading_pair, amount, order_type, price, nonce, fixture_resp,
+                    fixture_ws_1, fixture_ws_2):
+        if API_MOCK_ENABLED:
+            resp = self.order_response(fixture_resp, nonce, 'buy' if is_buy else 'sell', trading_pair)
+            self.web_app.update_response("post", self.base_api_url, "/api/v3/order", resp)
+        order_id = self.market.buy(trading_pair, amount, order_type, price)
+        if API_MOCK_ENABLED:
+            data = self.fixture(fixture_ws_1, c=order_id)
+            HummingWsServerFactory.send_json_threadsafe(self._ws_user_url, data, delay=0.1)
+            data = self.fixture(fixture_ws_2, c=order_id)
+            HummingWsServerFactory.send_json_threadsafe(self._ws_user_url, data, delay=0.11)
+        return order_id
+
     def test_buy_and_sell(self):
         self.assertGreater(self.market.get_balance("ETH"), Decimal("0.1"))
         amount: Decimal = 1
@@ -426,14 +439,21 @@ class BinanceMarketUnitTest(unittest.TestCase):
         quantize_bid_price: Decimal = self.market.quantize_order_price(trading_pair, bid_price * Decimal("0.7"))
         quantize_ask_price: Decimal = self.market.quantize_order_price(trading_pair, ask_price * Decimal("1.5"))
 
-        if API_MOCK_ENABLED:
-            order_resp = self.order_response(FixtureBinance.ORDER_BUY_NOT_FILLED, 1000001, "buy", "LINKETH")
-            self.web_app.update_response("post", self.base_api_url, "/api/v3/order", order_resp)
-        buy_id = self.market.buy(trading_pair, quantized_amount, OrderType.LIMIT, quantize_bid_price)
-        if API_MOCK_ENABLED:
-            order_resp = self.order_response(FixtureBinance.ORDER_SELL_NOT_FILLED, 1000002, "sell", "LINKETH")
-            self.web_app.update_response("post", self.base_api_url, "/api/v3/order", order_resp)
-        sell_id = self.market.sell(trading_pair, quantized_amount, OrderType.LIMIT, quantize_ask_price)
+        buy_id = self.place_order(True, "LINKETH", quantized_amount, OrderType.LIMIT, quantize_bid_price, 10001,
+                                  FixtureBinance.ORDER_BUY_NOT_FILLED, FixtureBinance.WS_AFTER_BUY_1,
+                                  FixtureBinance.WS_AFTER_BUY_2)
+        # if API_MOCK_ENABLED:
+        #     order_resp = self.order_response(FixtureBinance.ORDER_BUY_NOT_FILLED, 1000001, "buy", "LINKETH")
+        #     self.web_app.update_response("post", self.base_api_url, "/api/v3/order", order_resp)
+        # buy_id = self.market.buy(trading_pair, quantized_amount, OrderType.LIMIT, quantize_bid_price)
+
+        sell_id = self.place_order(False, "LINKETH", quantized_amount, OrderType.LIMIT, quantize_ask_price, 10002,
+                                   FixtureBinance.ORDER_SELL_NOT_FILLED, FixtureBinance.WS_AFTER_SELL_1,
+                                   FixtureBinance.WS_AFTER_SELL_2)
+        # if API_MOCK_ENABLED:
+        #     order_resp = self.order_response(FixtureBinance.ORDER_SELL_NOT_FILLED, 1000002, "sell", "LINKETH")
+        #     self.web_app.update_response("post", self.base_api_url, "/api/v3/order", order_resp)
+        # sell_id = self.market.sell(trading_pair, quantized_amount, OrderType.LIMIT, quantize_ask_price)
 
         self.run_parallel(asyncio.sleep(1))
         if API_MOCK_ENABLED:
